@@ -1,0 +1,201 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(
+          /databases/$(database)/documents/admins/$(request.auth.uid)
+        );
+    }
+
+    function hexColor(c) {
+      return c is string
+        && c.matches('^#[0-9a-fA-F]{6}$');
+    }
+
+    function validHouse(id) {
+      let d = request.resource.data;
+
+      return d.keys().hasOnly([
+        'ownerId',
+        'mahalla',
+        'gx',
+        'gz',
+        'floors',
+        'color',
+        'roof',
+        'win',
+        'door',
+        'roofType',
+        'name',
+        'insta',
+        'createdAt'
+      ])
+      && d.keys().hasAll([
+        'ownerId',
+        'mahalla',
+        'gx',
+        'gz',
+        'floors',
+        'color',
+        'roof',
+        'win',
+        'door',
+        'roofType',
+        'name',
+        'insta',
+        'createdAt'
+      ])
+      && d.ownerId == request.auth.uid
+      && d.mahalla is string
+      && d.mahalla.size() > 0
+      && d.mahalla.size() <= 60
+      && d.gx is int
+      && d.gx >= 0
+      && d.gx <= 9
+      && d.gz is int
+      && d.gz >= 0
+      && d.gz <= 9
+      && id == d.mahalla + '_' + string(d.gx) + '_' + string(d.gz)
+      && d.floors is int
+      && d.floors >= 1
+      && d.floors <= 10
+      && hexColor(d.color)
+      && hexColor(d.roof)
+      && hexColor(d.win)
+      && hexColor(d.door)
+      && (d.roofType == 'flat' || d.roofType == 'pyr')
+      && d.name is string
+      && d.name.size() <= 40
+      && d.insta is string
+      && d.insta.size() <= 40;
+    }
+
+    // MAHALLALAR
+    match /mahallas/{id} {
+      allow read: if true;
+
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly([
+          'name',
+          'createdBy'
+        ])
+        && request.resource.data.keys().hasAll([
+          'name',
+          'createdBy'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.createdBy == request.auth.uid;
+
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data)
+          .affectedKeys().hasOnly(['name'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 40;
+
+      allow delete: if false;
+    }
+
+    // UYLAR
+    match /houses/{id} {
+      allow read: if true;
+
+      allow create: if signedIn()
+        && validHouse(id);
+
+      allow update: if signedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && validHouse(id);
+
+      allow delete: if signedIn()
+        && resource.data.ownerId == request.auth.uid;
+    }
+
+    // BAHOLAR
+    match /ratings/{id} {
+      allow read: if true;
+
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly([
+          'houseId',
+          'mahalla',
+          'value',
+          'raterId'
+        ])
+        && request.resource.data.keys().hasAll([
+          'houseId',
+          'mahalla',
+          'value',
+          'raterId'
+        ])
+        && request.resource.data.raterId == request.auth.uid
+        && request.resource.data.houseId is string
+        && id == request.resource.data.houseId
+          + '__' + request.auth.uid
+        && request.resource.data.value is int
+        && request.resource.data.value >= 1
+        && request.resource.data.value <= 5
+        && exists(
+          /databases/$(database)/documents/houses/$(request.resource.data.houseId)
+        )
+        && get(
+          /databases/$(database)/documents/houses/$(request.resource.data.houseId)
+        ).data.ownerId != request.auth.uid
+        && get(
+          /databases/$(database)/documents/houses/$(request.resource.data.houseId)
+        ).data.mahalla == request.resource.data.mahalla;
+
+      allow delete: if signedIn()
+        && resource.data.raterId == request.auth.uid;
+    }
+
+    // O'YINCHILAR
+    match /players/{uid} {
+      allow read: if true;
+
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          'mahalla',
+          'x',
+          'z',
+          'ry',
+          'name',
+          'color',
+          'updatedAt'
+        ])
+        && request.resource.data.mahalla is string
+        && request.resource.data.x is number
+        && request.resource.data.x >= -110
+        && request.resource.data.x <= 110
+        && request.resource.data.z is number
+        && request.resource.data.z >= -110
+        && request.resource.data.z <= 110
+        && request.resource.data.ry is number
+        && request.resource.data.name is string
+        && request.resource.data.name.size() <= 30
+        && hexColor(request.resource.data.color);
+
+      allow delete: if signedIn()
+        && request.auth.uid == uid;
+    }
+
+    // ADMINLAR
+    match /admins/{uid} {
+      allow read: if signedIn()
+        && (request.auth.uid == uid || isAdmin());
+
+      allow write: if false;
+    }
+  }
+}
